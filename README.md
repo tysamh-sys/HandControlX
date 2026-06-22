@@ -1,39 +1,39 @@
-# HandControlX — Neon Spellweaver: Cyber Mage
+# HandControlX — Gesture Controlled Maze Navigation Demo
 
-An interactive, gesture-controlled cyberpunk arcade game built using **Pygame** and **MediaPipe**. Players act as elemental cyber-mages, using static hand postures facing their webcams to charge and fire homing spells at incoming magical runes, defending their central core.
+An interactive, gesture-controlled 2D maze navigation application built using **OpenCV** and **MediaPipe Hands**. The application runs completely inside a single dual-panel window showing real-time hand-joint tracking on the left and a retro-cyberpunk maze navigation game on the right.
 
-Unlike typical tracking games, **Neon Spellweaver** is optimized for low-framerate and low-quality webcams. It uses static hand postures instead of high-speed swiping movements, eliminating tracking failures caused by motion blur.
+This project is designed to showcase clean, high-performance computer vision implementation, custom neon vector rendering, and scale-invariant gesture classification.
 
 ---
 
 ## Key Features
 
-- **Asynchronous Computer Vision Threading**: Frame capture and MediaPipe joint classification run in a background daemon thread, allowing the main game graphics loop to render at a smooth 60 FPS.
-- **Robust Static Gesture Classifier**: Analyzes hand coordinates in real-time, detecting 5 distinct postures:
-  - ✊ **Fist**
-  - 🖐️ **Open Palm**
-  - ✌️ **Peace Sign**
-  - 👍 **Thumbs Up**
-  - 🤟 **Rock On / Spider-Man**
-- **Chrono-Dilation (Time Warp)**: Active posture checks detect when the player makes the "Rock On" gesture, slowing down incoming enemy runes to 20% speed while rendering a retro blue vignette.
-- **Procedural Sound Engine**: Audio effects (spell casts, portal impacts, score chimes, errors) are synthesized programmatically on launch using NumPy math wave formulas, meaning the game is completely self-contained with no external audio file dependencies.
-- **High-Tech Cyberpunk HUD**: Features glowing neon vector drawing layers, particle emitters (fire sparks, water ripples, rock debris, light stars), screen shake feedback, and a diagnostic Picture-in-Picture webcam overlay.
+- **Asynchronous Computer Vision Threading**: Frame capture, MediaPipe inference, and gesture classification execute in a background daemon thread, allowing the rendering loop to remain lightweight and performant.
+- **Twin Diagnostic Panels**:
+  - **LEFT PANEL (System View)**: Visualizes the tracking system, rendering a custom cyberpunk hand skeleton (neon cyan bones and glowing magenta nodes) along with diagnostic stats (Active Gesture, Tracking State, and Camera FPS).
+  - **RIGHT PANEL (Game View)**: Displays the 2D maze game, featuring a grid background, neon walls, a pulsating lime-green goal portal, particle trail emitters, and an interactive gesture guide at the bottom.
+- **Robust Scale-Invariant Classifier**: Detects finger extension ratios rather than absolute coordinate ranges. This makes gesture recognition robust to different hand sizes, hand orientation, and distance from the camera.
+- **Axis-Separated Collision Checking**: Smooth movement with bounding box math that allows the player to slide along walls, resulting in a premium and responsive controls feel.
+- **Zero Heavy Game Engines**: Renders everything (game scene, guide dashboard, and particles) entirely inside **OpenCV** canvas drawing layers (`numpy` arrays).
 
 ---
 
-## Spellcasting Controls
+## Gesture Controls & Dashboard Guide
 
-Hold your hand upright in view of your webcam. Perform and hold one of the following postures to target the nearest rune of that element:
+To control the player character (magenta circle), stand in front of your webcam and present one of the following postures:
 
-| Gesture | Spell Name | Targeted Rune Color |
+| Gesture | Movement Action | Description |
 | :--- | :--- | :--- |
-| ✊ **Fist** | Fire Blast | **Red (Fire)** |
-| 🖐️ **Open Palm** | Water Torrent | **Cyan (Water)** |
-| ✌️ **Peace Sign** | Earth Spike | **Green (Earth)** |
-| 👍 **Thumbs Up** | Light Beam | **Yellow (Light)** |
-| 🤟 **Rock On** | Time Warp | *Slows down time (consumes Chrono-Charge bar)* |
+| 🖐️ **Open Hand** | **UP** | Extend all four fingers upwards. |
+| ✊ **Closed Fist** | **DOWN** | Fold all four fingers. |
+| 👈 **Pointing Left** | **LEFT** | Extend index finger pointing to the visual left of the screen; fold others. |
+| 👉 **Pointing Right** | **RIGHT** | Extend index finger pointing to the visual right of the screen; fold others. |
 
-*Hold an elemental gesture for **0.4 seconds** to charge and cast the homing missile. Press `ESC` to go back to the menu or exit.*
+*Note: The active dashboard guide at the bottom of the game panel will glow in bright amber/cyan whenever the corresponding gesture is successfully detected.*
+
+### Fallback Keyboard Controls
+If you don't have a webcam connected or want to test the game mechanics, you can use the following keys on your keyboard:
+- `W` / `A` / `S` / `D` to navigate Up, Left, Down, and Right.
 
 ---
 
@@ -46,20 +46,20 @@ Hold your hand upright in view of your webcam. Perform and hold one of the follo
 ### 1. Install Dependencies
 Install the required packages using `pip`:
 ```bash
-pip install pygame opencv-python mediapipe numpy
+pip install opencv-python mediapipe numpy
 ```
 
-### 2. Run the Game
-Execute the main script to play:
+### 2. Run the Demo
+Run the main script:
 ```bash
 python main.py
 ```
+
+*Press `ESC` or click the window's close button to exit the application cleanly.*
 
 ---
 
 ## Code Architecture
 
-- `main.py`: Drives the primary orchestrator state machine (Menus, Calibration view, Gameplay loops, HUD meters).
-- `hand_tracker.py`: Threaded computer vision wrapper using OpenCV and MediaPipe to calculate coordinates and postures.
-- `sound_generator.py`: Generates chimes, combustion booms, and clangs programmatically.
-- `particles.py`: Animates trailing sparks, shockwaves, and homing comets.
+- [main.py](file:///c:/Users/otays/Desktop/handDitctor/main.py): Drives the primary execution loop, game canvas rendering, collision sliding math, particle systems, dashboard panels, and stitched side-by-side visual output.
+- [hand_tracker.py](file:///c:/Users/otays/Desktop/handDitctor/hand_tracker.py): Houses the background worker thread running MediaPipe Hands to process camera frames and return thread-safe tracking data.

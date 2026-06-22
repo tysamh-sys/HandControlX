@@ -5,13 +5,17 @@ import math
 import time
 
 class HandTracker:
+    """
+    A class that runs MediaPipe hand tracking in a background daemon thread
+    to capture, process, and classify gestures in real time without blocking
+    the main application rendering loop.
+    """
     def __init__(self, camera_index=0, detection_confidence=0.7, tracking_confidence=0.7):
         self.camera_index = camera_index
         self.detection_confidence = detection_confidence
         self.tracking_confidence = tracking_confidence
         
         self.mp_hands = mp.solutions.hands
-        self.mp_draw = mp.solutions.drawing_utils
         self.hands = None
         
         self.cap = None
@@ -19,70 +23,138 @@ class HandTracker:
         self.thread = None
         self.lock = threading.Lock()
         
-        # State variables (thread-safe access)
-        self.index_coords = None     # (x, y)
-        self.thumb_coords = None     # (x, y)
-        self.pinch_active = False
-        self.current_gesture = "NONE" # NONE, FIST, PALM, PEACE, THUMBS_UP, ROCK_ON
-        self.raw_frame = None        # Raw frame with landmarks drawn
+        # Thread-safe outputs
+        self.current_gesture = "NONE"  # UP, DOWN, LEFT, RIGHT, NONE
+        self.annotated_frame = None    # Webcam frame with custom HUD overlays
         self.frame_dims = (640, 480)
-        self.mirror = True
-        self.show_skeleton = True
         self.fps = 0
         
-        # Calibration thresholds
-        self.pinch_threshold = 40  # Distance in pixels to trigger pinch
-        
     def start(self):
+        """Starts the background tracking thread."""
         if self.running:
             return
-        
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         
     def _classify_gesture(self, landmarks):
-        """Classifies static hand postures based on finger extension joint geometry."""
+        """
+        Classifies gestures based on scale-invariant and orientation-invariant
+        finger extension ratios (straight vs folded).
+        """
         lm = landmarks.landmark
+        w, h = self.frame_dims
         
-        # Determine if index, middle, ring, pinky are extended (tip higher than PIP joint)
-        index_open = lm[8].y < lm[6].y
-        middle_open = lm[12].y < lm[10].y
-        ring_open = lm[16].y < lm[14].y
-        pinky_open = lm[20].y < lm[18].y
-        
-        # Determine if thumb is extended (tip is far from index MCP base joint)
-        # Using Euclidean distance comparison to make it orientation robust
-        d_tip = math.sqrt((lm[4].x - lm[5].x)**2 + (lm[4].y - lm[5].y)**2)
-        d_joint = math.sqrt((lm[3].x - lm[5].x)**2 + (lm[3].y - lm[5].y)**2)
-        thumb_open = d_tip > d_joint * 1.15
-        
-        fingers = [index_open, middle_open, ring_open, pinky_open]
-        
-        # Classification Matrix
-        if fingers == [0, 0, 0, 0]:
-            # All 4 fingers folded
-            if thumb_open and lm[4].y < lm[2].y:
-                return "THUMBS_UP"
-            else:
-                return "FIST"
-        elif fingers == [1, 1, 1, 1]:
-            return "PALM"
-        elif fingers == [1, 1, 0, 0]:
-            return "PEACE"
-        elif fingers == [1, 0, 0, 1]:
-            return "ROCK_ON"
+        # Convert landmarks to pixel positions
+        points = []
+        for i in range(21):
+            pt_x = int(lm[i].x * w)
+            pt_y = int(lm[i].y * h)
+            points.append((pt_x, pt_y))
             
-        return "NONE"
+        def dist(p1, p2):
+            return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+            
+        # Helper to calculate finger extension ratio (MCP -> TIP straight line / total segment length)
+        def get_extension_ratio(mcp, pip, dip, tip):
+            d1 = dist(points[mcp], points[pip])
+            d2 = dist(points[pip], points[dip])
+            d3 = dist(points[dip], points[tip])
+            s = dist(points[mcp], points[tip])
+            total_len = d1 + d2 + d3
+            if total_len == 0:
+                return 0.0
+            return s / total_len
+
+        # Get ratios for 4 main fingers
+        index_ratio = get_extension_ratio(5, 6, 7, 8)
+        middle_ratio = get_extension_ratio(9, 10, 11, 12)
+        ring_ratio = get_extension_ratio(13, 14, 15, 16)
+        pinky_ratio = get_extension_ratio(17, 18, 19, 20)
         
+        # Binary state thresholds
+        index_ext = index_ratio > 0.78
+        middle_ext = middle_ratio > 0.78
+        ring_ext = ring_ratio > 0.78
+        pinky_ext = pinky_ratio > 0.78
+        
+        index_fold = index_ratio < 0.55
+        middle_fold = middle_ratio < 0.55
+        ring_fold = ring_ratio < 0.55
+        pinky_fold = pinky_ratio < 0.55
+        
+        # 1. Closed Fist -> DOWN (Move Down)
+        if index_fold and middle_fold and ring_fold and pinky_fold:
+            return "DOWN"
+            
+        # 2. Open Hand -> UP (Move Up)
+        if index_ext and middle_ext and ring_ext and pinky_ext:
+            return "UP"
+            
+        # 3. Pointing Left or Right (Index extended, others folded)
+        if index_ext and middle_fold and ring_fold and pinky_fold:
+            dx = points[8][0] - points[5][0]
+            dy = points[8][1] - points[5][1]
+            index_len = dist(points[5], points[6]) + dist(points[6], points[7]) + dist(points[7], points[8])
+            
+            # Pointing Left (mirrored coordinates)
+            if dx < -0.4 * index_len and abs(dx) > abs(dy):
+                return "LEFT"
+            # Pointing Right (mirrored coordinates)
+            if dx > 0.4 * index_len and abs(dx) > abs(dy):
+                return "RIGHT"
+                
+        return "NONE"
+
+    def _draw_custom_hud(self, frame, hand_landmarks):
+        """Draws a premium cyberpunk style skeleton and connection HUD overlay."""
+        lm = hand_landmarks.landmark
+        w, h = self.frame_dims
+        
+        # Convert landmarks to pixel positions
+        points = []
+        for i in range(21):
+            pt_x = int(lm[i].x * w)
+            pt_y = int(lm[i].y * h)
+            points.append((pt_x, pt_y))
+            
+        # Standard MediaPipe Hand Connections
+        connections = [
+            (0, 1), (1, 2), (2, 3), (3, 4),      # Thumb
+            (0, 5), (5, 6), (6, 7), (7, 8),      # Index
+            (9, 10), (10, 11), (11, 12),         # Middle
+            (13, 14), (14, 15), (15, 16),        # Ring
+            (0, 17), (17, 18), (18, 19), (19, 20),# Pinky
+            (5, 9), (9, 13), (13, 17)            # Palm knuckles
+        ]
+        
+        # Draw skeleton connections (glowing neon cyan lines)
+        for parent, child in connections:
+            pt1 = points[parent]
+            pt2 = points[child]
+            # Glow effect
+            cv2.line(frame, pt1, pt2, (255, 80, 0), 4, cv2.LINE_AA)       # Subdued dark blue glow
+            cv2.line(frame, pt1, pt2, (255, 230, 0), 1, cv2.LINE_AA)      # Bright cyan inner line
+            
+        # Draw joints (magenta nodes with white core)
+        for i, pt in enumerate(points):
+            # Base joints vs tips
+            if i in [4, 8, 12, 16, 20]:  # Tips
+                cv2.circle(frame, pt, 7, (0, 0, 255), -1, cv2.LINE_AA)    # Outer red/magenta glow
+                cv2.circle(frame, pt, 3, (255, 255, 255), -1, cv2.LINE_AA)# White core
+            else:
+                cv2.circle(frame, pt, 5, (180, 0, 255), -1, cv2.LINE_AA)  # Magenta joints
+                cv2.circle(frame, pt, 2, (255, 255, 255), -1, cv2.LINE_AA)# White core
+                
     def _run(self):
-        # Initialize media pipe hands in the thread
+        # Initialize MediaPipe Hands inside background thread
         self.hands = self.mp_hands.Hands(
             max_num_hands=1,
             min_detection_confidence=self.detection_confidence,
             min_tracking_confidence=self.tracking_confidence
         )
         
+        # Open webcam capture
         self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW if cv2.os.name == 'nt' else cv2.CAP_ANY)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -100,70 +172,35 @@ class HandTracker:
                 time.sleep(0.01)
                 continue
                 
-            if self.mirror:
-                frame = cv2.flip(frame, 1)
-                
+            # Mirror the frame so visual left matches physical right (and vice versa)
+            frame = cv2.flip(frame, 1)
             h, w, _ = frame.shape
             self.frame_dims = (w, h)
             
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(rgb_frame)
             
-            index_pos = None
-            thumb_pos = None
-            pinch = False
             gesture = "NONE"
             
             if results.multi_hand_landmarks:
                 hand_landmarks = results.multi_hand_landmarks[0]
-                
-                # Extract landmarks for Index Tip (8) and Thumb Tip (4)
-                idx_lm = hand_landmarks.landmark[8]
-                thumb_lm = hand_landmarks.landmark[4]
-                
-                # Convert coordinates to pixels
-                idx_x, idx_y = int(idx_lm.x * w), int(idx_lm.y * h)
-                thumb_x, thumb_y = int(thumb_lm.x * w), int(thumb_lm.y * h)
-                
-                index_pos = (idx_x, idx_y)
-                thumb_pos = (thumb_x, thumb_y)
-                
-                # Pinch check
-                dist = math.sqrt((idx_x - thumb_x)**2 + (idx_y - thumb_y)**2)
-                if dist < self.pinch_threshold:
-                    pinch = True
-                    
-                # Classify static gesture
                 gesture = self._classify_gesture(hand_landmarks)
+                self._draw_custom_hud(frame, hand_landmarks)
                 
-                # Draw skeleton and labels
-                if self.show_skeleton:
-                    self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
-                    color = (0, 255, 0) if pinch else (0, 0, 255)
-                    cv2.line(frame, (idx_x, idx_y), (thumb_x, thumb_y), color, 2)
-                    cv2.circle(frame, (idx_x, idx_y), 6, (255, 0, 255), -1)
-                    cv2.circle(frame, (thumb_x, thumb_y), 6, (255, 0, 255), -1)
-                    
-                    # Draw gesture text overlay in webcam view
-                    cv2.putText(frame, f"Gesture: {gesture}", (10, 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            
-            # FPS Calculation
+            # Calculate FPS
             curr_time = time.time()
             self.fps = int(1.0 / (curr_time - prev_time)) if (curr_time - prev_time) > 0 else 0
             prev_time = curr_time
             
-            # Thread-safe write
+            # Thread-safe write to outputs
             with self.lock:
-                self.index_coords = index_pos
-                self.thumb_coords = thumb_pos
-                self.pinch_active = pinch
                 self.current_gesture = gesture
-                self.raw_frame = frame
+                self.annotated_frame = frame
+                self.hand_detected = (results.multi_hand_landmarks is not None)
                 
-            time.sleep(0.001)  # Yield CPU slice
+            time.sleep(0.001)
             
-        # Cleanup
+        # Clean up
         if self.cap:
             self.cap.release()
             self.cap = None
@@ -171,23 +208,24 @@ class HandTracker:
             self.hands.close()
             
     def get_data(self):
+        """Thread-safe access to status variables."""
         with self.lock:
             return {
-                "index": self.index_coords,
-                "thumb": self.thumb_coords,
-                "pinch": self.pinch_active,
                 "gesture": self.current_gesture,
+                "fps": self.fps,
                 "dims": self.frame_dims,
-                "fps": self.fps
+                "hand_detected": getattr(self, 'hand_detected', False)
             }
             
     def get_frame(self):
+        """Thread-safe access to processed frame."""
         with self.lock:
-            if self.raw_frame is not None:
-                return self.raw_frame.copy()
+            if self.annotated_frame is not None:
+                return self.annotated_frame.copy()
             return None
             
     def stop(self):
+        """Stops the tracking loop and joins the thread."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=1.0)
