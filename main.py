@@ -3,15 +3,30 @@ import numpy as np
 import time
 import math
 import random
+import tkinter as tk
 from hand_tracker import HandTracker
 
 # ==========================================
 # CONSTANTS & CONFIGURATION
 # ==========================================
-# Each panel is 640x480, stitched horizontally to make a 1280x480 window
-PANEL_W = 640
-PANEL_H = 480
+# Get screen resolution dynamically using tkinter
+try:
+    root = tk.Tk()
+    SCREEN_W = root.winfo_screenwidth()
+    SCREEN_H = root.winfo_screenheight()
+    root.destroy()
+except Exception:
+    SCREEN_W = 1280
+    SCREEN_H = 720
+
+# Window size (leaving room for taskbar and title bar)
+WINDOW_W = SCREEN_W - 60
+WINDOW_H = SCREEN_H - 120
 WINDOW_NAME = "Gesture Maze Navigation Demo"
+
+# Camera PIP overlay dimensions
+CAM_OVERLAY_W = 320
+CAM_OVERLAY_H = 240
 
 # BGR Neon Color Palette
 COLOR_BG = (15, 10, 8)            # Very dark indigo/black
@@ -27,27 +42,83 @@ COLOR_TEXT = (240, 240, 240)      # High-contrast white/gray for UI text
 COLOR_HUD_BOX = (40, 25, 20)      # HUD panel background
 COLOR_ACCENT = (0, 255, 255)      # Cyberpunk yellow/amber
 
-# 12x8 Maze Layout: 1 = Wall, 0 = Path
+# 30x15 Complex Maze Layout: 1 = Wall, 0 = Path
 # Designed with multiple paths, corridors, and dead ends
 MAZE = [
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
-    [1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1],
-    [1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1],
-    [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1],
-    [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
-    [1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1],
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1],
+    [1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+    [1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1],
+    [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1],
+    [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1],
+    [1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1],
+    [1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    [1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1],
+    [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ]
 
-# Maze offset & sizing inside the 640x480 right panel
-CELL_SIZE = 50
-OFFSET_X = (PANEL_W - len(MAZE[0]) * CELL_SIZE) // 2  # Centered horizontally: 20px padding
-OFFSET_Y = (PANEL_H - len(MAZE) * CELL_SIZE) // 2 - 20 # Offset upwards to leave 60px for the guide: 20px padding
+# Automatically calculate CELL_SIZE to fit the grid perfectly inside the window
+# We leave 60px padding at the bottom for the dashboard guide
+MAX_MAZE_H = WINDOW_H - 60
+CELL_SIZE = min(WINDOW_W // len(MAZE[0]), MAX_MAZE_H // len(MAZE))
+
+# Center the maze on the screen (leaving 60px at the bottom)
+OFFSET_X = (WINDOW_W - len(MAZE[0]) * CELL_SIZE) // 2
+OFFSET_Y = (MAX_MAZE_H - len(MAZE) * CELL_SIZE) // 2
+
+# Force cells under camera overlay (top-left: x from 0 to 320, y from 0 to 240) to be walls
+for r in range(len(MAZE)):
+    for c in range(len(MAZE[0])):
+        x1 = OFFSET_X + c * CELL_SIZE
+        y1 = OFFSET_Y + r * CELL_SIZE
+        if x1 < CAM_OVERLAY_W and y1 < CAM_OVERLAY_H:
+            MAZE[r][c] = 1
 
 # Start and goal coordinates (grid coordinates)
 START_CELL = (1, 1)
-GOAL_CELL = (10, 5)
+GOAL_CELL = (28, 13)
+
+# Safe spawn/goal relocation
+def relocate_points():
+    global START_CELL, GOAL_CELL
+    # Relocate START_CELL if it's a wall or under camera
+    if MAZE[START_CELL[1]][START_CELL[0]] == 1:
+        found_start = False
+        for r in range(len(MAZE)):
+            for c in range(len(MAZE[0])):
+                x1 = OFFSET_X + c * CELL_SIZE
+                y1 = OFFSET_Y + r * CELL_SIZE
+                if x1 < CAM_OVERLAY_W and y1 < CAM_OVERLAY_H:
+                    continue
+                if MAZE[r][c] == 0:
+                    START_CELL = (c, r)
+                    found_start = True
+                    break
+            if found_start:
+                break
+
+    # Relocate GOAL_CELL if it's a wall, under camera, or matches START_CELL
+    if MAZE[GOAL_CELL[1]][GOAL_CELL[0]] == 1 or GOAL_CELL == START_CELL:
+        found_goal = False
+        for r in reversed(range(len(MAZE))):
+            for c in reversed(range(len(MAZE[0]))):
+                x1 = OFFSET_X + c * CELL_SIZE
+                y1 = OFFSET_Y + r * CELL_SIZE
+                if x1 < CAM_OVERLAY_W and y1 < CAM_OVERLAY_H:
+                    continue
+                if MAZE[r][c] == 0 and (c, r) != START_CELL:
+                    GOAL_CELL = (c, r)
+                    found_goal = True
+                    break
+            if found_goal:
+                break
+
+relocate_points()
 
 # Calculate pixel centers for start and goal
 PLAYER_START_X = OFFSET_X + START_CELL[0] * CELL_SIZE + CELL_SIZE // 2
@@ -123,8 +194,9 @@ def main():
     tracker = HandTracker()
     tracker.start()
     
-    # Initialize OpenCV window
-    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+    # Initialize OpenCV window (standard, resizable with system borders)
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WINDOW_NAME, WINDOW_W, WINDOW_H)
     
     # Frame rate limiter variables (Target: 30 FPS)
     target_frame_time = 1.0 / 30.0
@@ -153,21 +225,19 @@ def main():
         if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
             break
             
-        # 2. Process active input (Gesture or Keyboard fallback)
+        # Keyboard backup navigation
         active_direction = "NONE"
         if raw_gesture != "NONE":
             active_direction = raw_gesture
-            
-        # Keyboard backup overrides
-        if key in [ord('w'), ord('W')]:
+        elif key == ord('w') or key == ord('W'):
             active_direction = "UP"
-        elif key in [ord('s'), ord('S')]:
+        elif key == ord('s') or key == ord('S'):
             active_direction = "DOWN"
-        elif key in [ord('a'), ord('A')]:
+        elif key == ord('a') or key == ord('A'):
             active_direction = "LEFT"
-        elif key in [ord('d'), ord('D')]:
+        elif key == ord('d') or key == ord('D'):
             active_direction = "RIGHT"
-            
+        
         # 3. Update Game Logic
         dx, dy = 0.0, 0.0
         if not victory_active:
@@ -237,102 +307,111 @@ def main():
             if p["life"] <= 0:
                 particles.remove(p)
                 
-        # 4. Render Left Panel (System View)
-        if cam_frame is not None:
-            left_panel = cam_frame
-        else:
-            # Show a nice loading canvas if the frame isn't ready
-            left_panel = np.zeros((PANEL_H, PANEL_W, 3), dtype=np.uint8)
-            left_panel[:] = COLOR_BG
-            cv2.putText(left_panel, "CAMERA CONNECTING...", (160, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2, cv2.LINE_AA)
-                        
-        # Draw system HUD boxes on Left Panel
-        cv2.rectangle(left_panel, (15, 15), (280, 115), COLOR_HUD_BOX, -1)
-        cv2.rectangle(left_panel, (15, 15), (280, 115), COLOR_WALL_BORDER, 1)
-        
-        status_text = "TRACKING ACTIVE" if hand_detected else "SCANNING..."
-        status_color = (0, 255, 0) if hand_detected else (0, 165, 255) # Green / Amber
-        
-        cv2.putText(left_panel, f"SYS STATE: {status_text}", (25, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1, cv2.LINE_AA)
-        cv2.putText(left_panel, f"GESTURE: {active_direction}", (25, 65), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT, 1, cv2.LINE_AA)
-        cv2.putText(left_panel, f"TRACKER RATE: {tracker_fps} FPS", (25, 90), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1, cv2.LINE_AA)
-                    
-        # Small pulsating scanning indicator dot
-        ind_pulse = int(5 + math.sin(time.time() * 8) * 2)
-        cv2.circle(left_panel, (250, 40), ind_pulse, status_color, -1, cv2.LINE_AA)
-        
-        # Outer panel border
-        cv2.rectangle(left_panel, (4, 4), (PANEL_W - 4, PANEL_H - 4), COLOR_WALL_BORDER, 2, cv2.LINE_AA)
-        
-        # 5. Render Right Panel (Game View)
-        game_panel = np.zeros((PANEL_H, PANEL_W, 3), dtype=np.uint8)
-        game_panel[:] = COLOR_BG
+        # 4. Render Layout onto single canvas
+        canvas = np.zeros((WINDOW_H, WINDOW_W, 3), dtype=np.uint8)
+        canvas[:] = COLOR_BG
         
         # Draw background grids
-        for r in range(0, PANEL_H, 25):
-            cv2.line(game_panel, (0, r), (PANEL_W, r), COLOR_GRID, 1)
-        for c in range(0, PANEL_W, 25):
-            cv2.line(game_panel, (c, 0), (c, PANEL_H), COLOR_GRID, 1)
+        for r in range(0, WINDOW_H, 25):
+            cv2.line(canvas, (0, r), (WINDOW_W, r), COLOR_GRID, 1)
+        for c in range(0, WINDOW_W, 25):
+            cv2.line(canvas, (c, 0), (c, WINDOW_H), COLOR_GRID, 1)
             
-        # Draw Maze Walls
+        # Draw Maze Walls (skip top-left corner under camera overlay)
         for r in range(len(MAZE)):
             for c in range(len(MAZE[0])):
                 if MAZE[r][c] == 1:
                     x1 = OFFSET_X + c * CELL_SIZE
                     y1 = OFFSET_Y + r * CELL_SIZE
+                    if x1 < CAM_OVERLAY_W and y1 < CAM_OVERLAY_H:
+                        continue
                     x2 = x1 + CELL_SIZE
                     y2 = y1 + CELL_SIZE
                     # Fill
-                    cv2.rectangle(game_panel, (x1, y1), (x2, y2), COLOR_WALL_FILL, -1)
+                    cv2.rectangle(canvas, (x1, y1), (x2, y2), COLOR_WALL_FILL, -1)
                     # Border
-                    cv2.rectangle(game_panel, (x1, y1), (x2, y2), COLOR_WALL_BORDER, 1, cv2.LINE_AA)
+                    cv2.rectangle(canvas, (x1, y1), (x2, y2), COLOR_WALL_BORDER, 1, cv2.LINE_AA)
                     
         # Draw Start cell indicator
-        cv2.putText(game_panel, "START", (OFFSET_X + START_CELL[0]*CELL_SIZE + 5, OFFSET_Y + START_CELL[1]*CELL_SIZE + 30), 
+        cv2.putText(canvas, "START", (OFFSET_X + START_CELL[0]*CELL_SIZE + 5, OFFSET_Y + START_CELL[1]*CELL_SIZE + CELL_SIZE // 2 + 5), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 100, 100), 1, cv2.LINE_AA)
                     
         # Draw Pulsating Goal Portal (Lime Green)
         goal_pulse = 16 + int(math.sin(time.time() * 10) * 3)
-        cv2.circle(game_panel, (GOAL_X, GOAL_Y), goal_pulse + 5, (0, 100, 0), 2, cv2.LINE_AA) # Outer rings
-        cv2.circle(game_panel, (GOAL_X, GOAL_Y), goal_pulse, COLOR_GOAL_GLOW, 2, cv2.LINE_AA)
-        cv2.circle(game_panel, (GOAL_X, GOAL_Y), goal_pulse - 5, COLOR_GOAL_CORE, -1, cv2.LINE_AA)
-        cv2.circle(game_panel, (GOAL_X, GOAL_Y), 4, COLOR_PLAYER_WHITE, -1, cv2.LINE_AA)
-        cv2.putText(game_panel, "GOAL", (GOAL_X - 16, GOAL_Y - 24), 
+        goal_pulse = min(goal_pulse, CELL_SIZE // 2 - 4)
+        cv2.circle(canvas, (GOAL_X, GOAL_Y), goal_pulse + 5, (0, 100, 0), 2, cv2.LINE_AA) # Outer rings
+        cv2.circle(canvas, (GOAL_X, GOAL_Y), goal_pulse, COLOR_GOAL_GLOW, 2, cv2.LINE_AA)
+        cv2.circle(canvas, (GOAL_X, GOAL_Y), goal_pulse - 5, COLOR_GOAL_CORE, -1, cv2.LINE_AA)
+        cv2.circle(canvas, (GOAL_X, GOAL_Y), 4, COLOR_PLAYER_WHITE, -1, cv2.LINE_AA)
+        cv2.putText(canvas, "GOAL", (GOAL_X - 16, GOAL_Y - goal_pulse - 8), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_GOAL_CORE, 1, cv2.LINE_AA)
                     
         # Draw Particles
         for p in particles:
             sz = int(p["size"] * (p["life"] / p["max_life"]))
             sz = max(1, sz)
-            cv2.circle(game_panel, (int(p["x"]), int(p["y"])), sz, p["color"], -1, cv2.LINE_AA)
+            cv2.circle(canvas, (int(p["x"]), int(p["y"])), sz, p["color"], -1, cv2.LINE_AA)
             
         # Draw Glowing Player character (Magenta core and outline)
-        cv2.circle(game_panel, (int(player_x), int(player_y)), player_radius + 4, COLOR_PLAYER_GLOW, 3, cv2.LINE_AA)
-        cv2.circle(game_panel, (int(player_x), int(player_y)), player_radius, COLOR_PLAYER_CORE, -1, cv2.LINE_AA)
-        cv2.circle(game_panel, (int(player_x), int(player_y)), 4, COLOR_PLAYER_WHITE, -1, cv2.LINE_AA)
+        player_rad_draw = min(player_radius, CELL_SIZE // 2 - 6)
+        cv2.circle(canvas, (int(player_x), int(player_y)), player_rad_draw + 4, COLOR_PLAYER_GLOW, 3, cv2.LINE_AA)
+        cv2.circle(canvas, (int(player_x), int(player_y)), player_rad_draw, COLOR_PLAYER_CORE, -1, cv2.LINE_AA)
+        cv2.circle(canvas, (int(player_x), int(player_y)), 4, COLOR_PLAYER_WHITE, -1, cv2.LINE_AA)
         
+        # Draw Webcam PIP overlay at top-left (with overlay stats)
+        if cam_frame is not None:
+            pip_frame = cv2.resize(cam_frame, (CAM_OVERLAY_W, CAM_OVERLAY_H))
+            
+            # Draw semi-transparent HUD background box inside PIP
+            hud_overlay = pip_frame.copy()
+            cv2.rectangle(hud_overlay, (5, 160), (315, 235), (20, 15, 12), -1)
+            cv2.addWeighted(hud_overlay, 0.75, pip_frame, 0.25, 0, pip_frame)
+            cv2.rectangle(pip_frame, (5, 160), (315, 235), COLOR_WALL_BORDER, 1, cv2.LINE_AA)
+            
+            status_text = "ACTIVE" if hand_detected else "SCANNING"
+            status_color = (0, 255, 0) if hand_detected else (0, 165, 255)
+            
+            cv2.putText(pip_frame, f"SYS STATE: {status_text}", (15, 180), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, status_color, 1, cv2.LINE_AA)
+            cv2.putText(pip_frame, f"GESTURE: {active_direction}", (15, 198), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT, 1, cv2.LINE_AA)
+            cv2.putText(pip_frame, f"TRACKER: {tracker_fps} FPS", (15, 216), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
+            
+            # Small pulsating scanning indicator dot inside PIP
+            ind_pulse = int(4 + math.sin(time.time() * 8) * 1.5)
+            cv2.circle(pip_frame, (295, 180), ind_pulse, status_color, -1, cv2.LINE_AA)
+            
+            canvas[0:CAM_OVERLAY_H, 0:CAM_OVERLAY_W] = pip_frame
+            cv2.rectangle(canvas, (0, 0), (CAM_OVERLAY_W, CAM_OVERLAY_H), COLOR_WALL_BORDER, 2, cv2.LINE_AA)
+        else:
+            cv2.rectangle(canvas, (0, 0), (CAM_OVERLAY_W, CAM_OVERLAY_H), COLOR_HUD_BOX, -1)
+            cv2.rectangle(canvas, (0, 0), (CAM_OVERLAY_W, CAM_OVERLAY_H), COLOR_WALL_BORDER, 2, cv2.LINE_AA)
+            cv2.putText(canvas, "CAMERA CONNECTING...", (30, 120), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+                        
         # Draw Victory HUD overlay overlaying the game scene
         if victory_active:
-            overlay = game_panel.copy()
-            cv2.rectangle(overlay, (50, 150), (PANEL_W - 50, 310), (20, 20, 20), -1)
-            cv2.rectangle(overlay, (50, 150), (PANEL_W - 50, 310), COLOR_GOAL_CORE, 2, cv2.LINE_AA)
-            cv2.addWeighted(overlay, 0.85, game_panel, 0.15, 0, game_panel)
+            overlay = canvas.copy()
+            overlay_w = min(500, WINDOW_W - 100)
+            overlay_h = 160
+            x1 = (WINDOW_W - overlay_w) // 2
+            y1 = (WINDOW_H - overlay_h) // 2
+            cv2.rectangle(overlay, (x1, y1), (x1 + overlay_w, y1 + overlay_h), (20, 20, 20), -1)
+            cv2.rectangle(overlay, (x1, y1), (x1 + overlay_w, y1 + overlay_h), COLOR_GOAL_CORE, 2, cv2.LINE_AA)
+            cv2.addWeighted(overlay, 0.85, canvas, 0.15, 0, canvas)
             
-            cv2.putText(game_panel, "MAZE COMPLETED!", (120, 215), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLOR_GOAL_CORE, 3, cv2.LINE_AA)
-            cv2.putText(game_panel, "Smooth gesture navigation successful!", (165, 250), 
+            cv2.putText(canvas, "MAZE COMPLETED!", (x1 + 30, y1 + 55), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLOR_GOAL_CORE, 3, cv2.LINE_AA)
+            cv2.putText(canvas, "Smooth gesture navigation successful!", (x1 + 30, y1 + 90), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT, 1, cv2.LINE_AA)
-            cv2.putText(game_panel, f"Resetting start in {int(victory_timer / 15) + 1}s...", (230, 285), 
+            cv2.putText(canvas, f"Resetting start in {int(victory_timer / 15) + 1}s...", (x1 + 30, y1 + 125), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1, cv2.LINE_AA)
                         
-        # Draw Visual Guide Dashboard at the bottom (y=420 to y=480)
-        dash_y = 420
+        # Draw Visual Guide Dashboard at the bottom (y=WINDOW_H - 60 to WINDOW_H)
+        dash_y = WINDOW_H - 60
         dash_h = 60
-        panel_w = PANEL_W // 4
+        panel_w = WINDOW_W // 4
         
         directions = ["UP", "DOWN", "LEFT", "RIGHT"]
         gestures = ["OPEN HAND", "CLOSED FIST", "POINT LEFT", "POINT RIGHT"]
@@ -349,8 +428,8 @@ def main():
             box_thick = 2 if is_hl else 1
             
             # Panel box
-            cv2.rectangle(game_panel, (px_l + 4, dash_y + 4), (px_r - 4, dash_y + dash_h - 4), box_bg, -1)
-            cv2.rectangle(game_panel, (px_l + 4, dash_y + 4), (px_r - 4, dash_y + dash_h - 4), box_border, box_thick, cv2.LINE_AA)
+            cv2.rectangle(canvas, (px_l + 4, dash_y + 4), (px_r - 4, dash_y + dash_h - 4), box_bg, -1)
+            cv2.rectangle(canvas, (px_l + 4, dash_y + 4), (px_r - 4, dash_y + dash_h - 4), box_border, box_thick, cv2.LINE_AA)
             
             # Icon location
             ic_x = px_l + 28
@@ -359,40 +438,34 @@ def main():
             
             # Draw tiny vector directions arrows
             if d_name == "UP":
-                cv2.line(game_panel, (ic_x, ic_y + 9), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x - 5, ic_y - 4), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x + 5, ic_y - 4), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x, ic_y + 9), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x - 5, ic_y - 4), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x + 5, ic_y - 4), (ic_x, ic_y - 9), ic_color, 2, cv2.LINE_AA)
             elif d_name == "DOWN":
-                cv2.line(game_panel, (ic_x, ic_y - 9), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x - 5, ic_y + 4), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x + 5, ic_y + 4), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x, ic_y - 9), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x - 5, ic_y + 4), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x + 5, ic_y + 4), (ic_x, ic_y + 9), ic_color, 2, cv2.LINE_AA)
             elif d_name == "LEFT":
-                cv2.line(game_panel, (ic_x + 9, ic_y), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x - 4, ic_y - 5), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x - 4, ic_y + 5), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x + 9, ic_y), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x - 4, ic_y - 5), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x - 4, ic_y + 5), (ic_x - 9, ic_y), ic_color, 2, cv2.LINE_AA)
             elif d_name == "RIGHT":
-                cv2.line(game_panel, (ic_x - 9, ic_y), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x + 4, ic_y - 5), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
-                cv2.line(game_panel, (ic_x + 4, ic_y + 5), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x - 9, ic_y), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x + 4, ic_y - 5), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
+                cv2.line(canvas, (ic_x + 4, ic_y + 5), (ic_x + 9, ic_y), ic_color, 2, cv2.LINE_AA)
                 
             # Panel text
             txt_color = COLOR_PLAYER_WHITE if is_hl else COLOR_TEXT
-            cv2.putText(game_panel, d_name, (px_l + 50, dash_y + 22), 
+            cv2.putText(canvas, d_name, (px_l + 50, dash_y + 22), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, txt_color, 1, cv2.LINE_AA)
-            cv2.putText(game_panel, g_name, (px_l + 50, dash_y + 40), 
+            cv2.putText(canvas, g_name, (px_l + 50, dash_y + 40), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.32, (120, 100, 95), 1, cv2.LINE_AA)
                         
-        # Outer panel border
-        cv2.rectangle(game_panel, (4, 4), (PANEL_W - 4, PANEL_H - 4), COLOR_WALL_BORDER, 2, cv2.LINE_AA)
+        # Outer screen border
+        cv2.rectangle(canvas, (4, 4), (WINDOW_W - 4, WINDOW_H - 4), COLOR_WALL_BORDER, 2, cv2.LINE_AA)
         
-        # 6. Compose Combined Dual-Panel View
-        combined_view = cv2.hconcat([left_panel, game_panel])
-        
-        # Draw central divider line (neon yellow accent)
-        cv2.line(combined_view, (PANEL_W, 0), (PANEL_W, PANEL_H), COLOR_WALL_BORDER, 2)
-        
-        # Render stitched frame to window
-        cv2.imshow(WINDOW_NAME, combined_view)
+        # Render canvas frame to window
+        cv2.imshow(WINDOW_NAME, canvas)
         
         # Frame rate controller delay: ensures smooth loop timing
         elapsed = time.time() - frame_start
