@@ -1,3 +1,5 @@
+<img width="900" alt="Capture d&#39;écran 2026-06-25 101725" src="https://github.com/user-attachments/assets/6d5a3a89-42f8-4d54-8fb6-f6985814714f" />
+<img width="900" alt="Capture d&#39;écran 2026-06-25 101651" src="https://github.com/user-attachments/assets/e7c5628f-fdd0-4ca7-8308-e65cd44435a3" />
 # HandControlX — Gesture Controlled Maze Navigation Demo
 
 An interactive, gesture-controlled 2D maze navigation application built using **OpenCV** and **MediaPipe Hands**. The application runs completely inside a single dual-panel window showing real-time hand-joint tracking on the left and a retro-cyberpunk maze navigation game on the right.
